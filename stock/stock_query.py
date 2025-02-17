@@ -83,44 +83,42 @@ def plot_kline(code: str, data: pd.DataFrame, stock_info: Dict[str, Any]) -> Non
     pre_close = stock_info['pre_close']
     change = (current_price - pre_close) / pre_close * 100 if pre_close != 0 else 0.0
     
-    # 计算实际的最大涨跌幅
-    actual_max_change = ((data['price'].max() - pre_close) / pre_close * 100)
-    actual_min_change = ((data['price'].min() - pre_close) / pre_close * 100)
+    # 计算每个价格点对应的涨跌幅
+    price_changes = ((data['price'] - pre_close) / pre_close * 100)
     
-    # 使用最大的绝对值来确定范围，保证对称
-    max_abs_change = max(abs(actual_max_change), abs(actual_min_change))
+    # 使用实际价格的涨跌幅来设置Y轴范围
+    actual_max_change = price_changes.max()
+    actual_min_change = price_changes.min()
+    
+    # 确保范围至少有±0.5%的空间
+    min_range = 0.5
+    if actual_max_change - actual_min_change < min_range:
+        center = (actual_max_change + actual_min_change) / 2
+        actual_max_change = center + min_range/2
+        actual_min_change = center - min_range/2
+    
+    # 添加一些边距
+    padding = (actual_max_change - actual_min_change) * 0.1
+    max_tick = actual_max_change + padding
+    min_tick = actual_min_change - padding
     
     # 动态确定步长
-    if max_abs_change < 1:
+    range_size = max_tick - min_tick
+    if range_size < 2:
         step = 0.2  # 0.2%的步长
-    elif max_abs_change < 2:
+    elif range_size < 4:
         step = 0.5  # 0.5%的步长
-    elif max_abs_change < 5:
+    elif range_size < 10:
         step = 1.0  # 1%的步长
     else:
         step = 2.0  # 2%的步长
     
-    # 计算主要刻度（整数刻度）
-    main_ticks = np.arange(0, max_abs_change, step)
-    # 移除最后一个整数刻度如果它太接近最大值
-    if max_abs_change - main_ticks[-1] < step * 0.3:
-        main_ticks = main_ticks[:-1]
-    
-    # 添加最大值刻度（精确到小数点后一位）
-    max_tick = np.ceil(max_abs_change * 10) / 10  # 向上取整到0.1%
-    min_tick = -max_tick
-    
-    # 生成完整的刻度列表
-    positive_ticks = np.append(main_ticks, max_tick)
-    negative_ticks = -positive_ticks[::-1]
-    ticks = np.concatenate([negative_ticks, [0], positive_ticks])
-    
-    # 添加小边距避免线条碰到边框
-    margin = step * 0.1  # 步长的10%作为边距
+    # 生成主刻度
+    ticks = np.arange(np.floor(min_tick/step)*step, np.ceil(max_tick/step)*step + step, step)
     
     # 设置涨跌幅轴的范围和刻度
     ax2 = ax1.twinx()
-    ax2.set_ylim(min_tick - margin, max_tick + margin)
+    ax2.set_ylim(min_tick, max_tick)
     ax2.set_yticks(ticks)
     ax2.set_ylabel('涨跌幅(%)')
     
@@ -130,21 +128,11 @@ def plot_kline(code: str, data: pd.DataFrame, stock_info: Dict[str, Any]) -> Non
             ax2.text(1.02, tick, '0.00%', transform=ax2.get_yaxis_transform(),
                     color='gray', va='center')
         elif tick > 0:
-            # 最大值显示一位小数，其他为整数
-            if tick == max_tick:
-                ax2.text(1.02, tick, f'{tick:+.1f}%', transform=ax2.get_yaxis_transform(),
-                        color='red', va='center')
-            else:
-                ax2.text(1.02, tick, f'{tick:+.0f}%', transform=ax2.get_yaxis_transform(),
-                        color='red', va='center')
+            ax2.text(1.02, tick, f'{tick:+.1f}%', transform=ax2.get_yaxis_transform(),
+                    color='red', va='center')
         else:
-            # 最小值显示一位小数，其他为整数
-            if tick == min_tick:
-                ax2.text(1.02, tick, f'{tick:.1f}%', transform=ax2.get_yaxis_transform(),
-                        color='green', va='center')
-            else:
-                ax2.text(1.02, tick, f'{tick:.0f}%', transform=ax2.get_yaxis_transform(),
-                        color='green', va='center')
+            ax2.text(1.02, tick, f'{tick:.1f}%', transform=ax2.get_yaxis_transform(),
+                    color='green', va='center')
     
     # 隐藏右侧Y轴的刻度线和标签
     ax2.set_yticklabels([])
@@ -382,7 +370,7 @@ def query_securities(codes: List[str]):
         return print(json.dumps({
             "items": [{
                 "title": "请输入完整的股票代码",
-                "subtitle": "至少需要4位数字",
+                "subtitle": "至少需要4位数p字",
                 "valid": False
             }]
         }))
