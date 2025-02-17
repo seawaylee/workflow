@@ -83,52 +83,46 @@ def plot_kline(code: str, data: pd.DataFrame, stock_info: Dict[str, Any]) -> Non
     pre_close = stock_info['pre_close']
     change = (current_price - pre_close) / pre_close * 100 if pre_close != 0 else 0.0
     
-    # 绘制价格线（根据涨跌设置颜色）
-    price_color = ['red' if p >= pre_close else 'green' for p in data['price']]
-    for i in range(1, len(data['price'])):
-        ax1.plot(data.index[i-1:i+1], data['price'].iloc[i-1:i+1], 
-                 color=price_color[i], linewidth=1)
+    # 计算实际的最大涨跌幅
+    actual_max_change = ((data['price'].max() - pre_close) / pre_close * 100)
+    actual_min_change = ((data['price'].min() - pre_close) / pre_close * 100)
     
-    # 添加昨收价参考线
-    ax1.axhline(y=pre_close, color='gray', linestyle='--', alpha=0.5)
+    # 使用最大的绝对值来确定范围，保证对称
+    max_abs_change = max(abs(actual_max_change), abs(actual_min_change))
     
-    # 设置标题
-    ax1.set_title(f"{stock_info['name']} ({code}) 分时图 - {datetime.now().strftime('%Y-%m-%d')} 涨跌幅: {change:.2f}%")
+    # 动态确定步长
+    if max_abs_change < 1:
+        step = 0.2  # 0.2%的步长
+    elif max_abs_change < 2:
+        step = 0.5  # 0.5%的步长
+    elif max_abs_change < 5:
+        step = 1.0  # 1%的步长
+    else:
+        step = 2.0  # 2%的步长
     
-    # 设置左侧Y轴（价格）
-    ax1.set_ylabel('价格(元)')
+    # 计算主要刻度（整数刻度）
+    main_ticks = np.arange(0, max_abs_change, step)
+    # 移除最后一个整数刻度如果它太接近最大值
+    if max_abs_change - main_ticks[-1] < step * 0.3:
+        main_ticks = main_ticks[:-1]
     
-    # 添加右侧Y轴（涨跌幅）
+    # 添加最大值刻度（精确到小数点后一位）
+    max_tick = np.ceil(max_abs_change * 10) / 10  # 向上取整到0.1%
+    min_tick = -max_tick
+    
+    # 生成完整的刻度列表
+    positive_ticks = np.append(main_ticks, max_tick)
+    negative_ticks = -positive_ticks[::-1]
+    ticks = np.concatenate([negative_ticks, [0], positive_ticks])
+    
+    # 添加小边距避免线条碰到边框
+    margin = step * 0.1  # 步长的10%作为边距
+    
+    # 设置涨跌幅轴的范围和刻度
     ax2 = ax1.twinx()
-    
-    # 计算价格区间对应的涨跌幅区间
-    price_range = max(abs(data['price'].max() - pre_close), abs(data['price'].min() - pre_close))
-    price_margin = price_range * 0.1  # 留出10%边距
-    
-    y1_min = pre_close - price_range - price_margin
-    y1_max = pre_close + price_range + price_margin
-    
-    # 设置价格轴的范围
-    ax1.set_ylim(y1_min, y1_max)
-    
-    # 计算对应的涨跌幅范围
-    y2_min = (y1_min - pre_close) / pre_close * 100
-    y2_max = (y1_max - pre_close) / pre_close * 100
-    
-    # 设置涨跌幅轴的范围
-    ax2.set_ylim(y2_min, y2_max)
-    ax2.set_ylabel('涨跌幅(%)')
-    
-    # 设置固定的涨跌幅刻度
-    change_range = max(abs(y2_min), abs(y2_max))
-    step = 1.0  # 1%的步长
-    if change_range > 5:
-        step = 2.0
-    if change_range > 10:
-        step = 5.0
-        
-    ticks = np.arange(np.floor(y2_min/step)*step, np.ceil(y2_max/step)*step+step, step)
+    ax2.set_ylim(min_tick - margin, max_tick + margin)
     ax2.set_yticks(ticks)
+    ax2.set_ylabel('涨跌幅(%)')
     
     # 设置涨跌幅刻度的颜色和标签
     for tick in ticks:
@@ -136,30 +130,57 @@ def plot_kline(code: str, data: pd.DataFrame, stock_info: Dict[str, Any]) -> Non
             ax2.text(1.02, tick, '0.00%', transform=ax2.get_yaxis_transform(),
                     color='gray', va='center')
         elif tick > 0:
-            ax2.text(1.02, tick, f'{tick:+.2f}%', transform=ax2.get_yaxis_transform(),
-                    color='red', va='center')
+            # 最大值显示一位小数，其他为整数
+            if tick == max_tick:
+                ax2.text(1.02, tick, f'{tick:+.1f}%', transform=ax2.get_yaxis_transform(),
+                        color='red', va='center')
+            else:
+                ax2.text(1.02, tick, f'{tick:+.0f}%', transform=ax2.get_yaxis_transform(),
+                        color='red', va='center')
         else:
-            ax2.text(1.02, tick, f'{tick:.2f}%', transform=ax2.get_yaxis_transform(),
-                    color='green', va='center')
+            # 最小值显示一位小数，其他为整数
+            if tick == min_tick:
+                ax2.text(1.02, tick, f'{tick:.1f}%', transform=ax2.get_yaxis_transform(),
+                        color='green', va='center')
+            else:
+                ax2.text(1.02, tick, f'{tick:.0f}%', transform=ax2.get_yaxis_transform(),
+                        color='green', va='center')
     
     # 隐藏右侧Y轴的刻度线和标签
     ax2.set_yticklabels([])
     
+    # 绘制价格线（根据涨跌设置颜色，并添加轻微透明度）
+    price_color = ['red' if p >= pre_close else 'green' for p in data['price']]
+    for i in range(1, len(data['price'])):
+        ax1.plot(data.index[i-1:i+1], data['price'].iloc[i-1:i+1], 
+                 color=price_color[i], linewidth=1.2, alpha=0.9)
+    
+    # 添加昨收价参考线（使用更细的虚线）
+    ax1.axhline(y=pre_close, color='gray', linestyle='--', alpha=0.4, linewidth=0.8)
+    
+    # 设置标题
+    ax1.set_title(f"{stock_info['name']} ({code}) 分时图 - {datetime.now().strftime('%Y-%m-%d')} 涨跌幅: {change:.2f}%")
+    
+    # 设置左侧Y轴（价格）
+    ax1.set_ylabel('价格(元)')
+    
     # 设置网格
     ax1.grid(True, linestyle='--', alpha=0.3)
-    
-    # 设置背景色
     ax1.set_facecolor('#F6F6F6')
     
     # 下方成交量图，占1/6
     ax3 = plt.subplot2grid((6, 1), (5, 0))
     
-    # 根据价格高低设置成交量柱状图颜色
-    colors = ['red' if p >= pre_close else 'green' for p in data['price']]
-    
     # 将成交额转换为千万元单位
     amount_in_10m = data['amount'] / 1000
-    ax3.bar(data.index, amount_in_10m, color=colors, alpha=0.7, width=0.0003)
+    
+    # 绘制成交额柱状图（东方财富风格）
+    for i in range(len(amount_in_10m)):
+        if i > 0:
+            color = 'red' if data['price'].iloc[i] > data['price'].iloc[i-1] else 'green'
+        else:
+            color = 'red' if data['price'].iloc[i] > pre_close else 'green'
+        ax3.bar(data.index[i], amount_in_10m.iloc[i], color=color, alpha=0.7, width=0.0003)
     
     # 设置成交量图样式
     ax3.grid(True, linestyle='--', alpha=0.3)
@@ -175,12 +196,21 @@ def plot_kline(code: str, data: pd.DataFrame, stock_info: Dict[str, Any]) -> Non
     ax3.set_xlim(xlim_min, xlim_max)
     
     # 设置x轴时间格式
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-    ax3.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+    time_formatter = mdates.DateFormatter('%H:%M')
+    ax1.xaxis.set_major_formatter(time_formatter)
+    ax3.xaxis.set_major_formatter(time_formatter)
     
-    # 设置x轴主要刻度为每小时
-    ax1.xaxis.set_major_locator(mdates.HourLocator())
-    ax3.xaxis.set_major_locator(mdates.HourLocator())
+    # 创建固定的时间刻度
+    trading_hours = [
+        pd.Timestamp.combine(today, pd.Timestamp(f'{h:02d}:{m:02d}:00').time())
+        for h in [9, 10, 11, 13, 14, 15]
+        for m in [0, 30] if not (h == 9 and m == 0) and not (h == 15 and m == 30)
+    ]
+    trading_hours.insert(0, xlim_min)  # 添加9:30
+    
+    # 设置刻度
+    ax1.set_xticks(trading_hours)
+    ax3.set_xticks(trading_hours)
     
     # 添加中午休市时段的灰色背景
     lunch_start = pd.Timestamp.combine(today, pd.Timestamp('11:30:00').time())

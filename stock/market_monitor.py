@@ -9,7 +9,7 @@ workflow_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(workflow_dir)
 
 from stock_utils import StockUtils
-from fund_utils import FundUtils
+from fund_utils import sFundUtils
 
 def format_security_info(result: Dict[str, Union[str, float]], is_fund: bool = False) -> Dict:
     """格式化证券信息为 workflow 格式"""
