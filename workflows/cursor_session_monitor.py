@@ -234,12 +234,17 @@ class CursorSessionMonitor:
         except Exception as e:
             print(f"发送报警失败: {str(e)}")
 
-    def monitor(self):
+    def monitor(self, strict_mode=False):
         """
         执行监测逻辑
+        :param strict_mode: 严格模式，忽略阈值，只要有未授权session就撤销
         """
-        print(f"开始监测cursor会话 (报警阈值: {self.alert_threshold})")
-        print(f"授权会话白名单: {len(self.authorized_sessions)} 个")
+        if strict_mode:
+            print("🔒 严格模式监测：任何未授权会话都将被立即撤销")
+            print(f"授权会话白名单: {len(self.authorized_sessions)} 个")
+        else:
+            print(f"开始监测cursor会话 (报警阈值: {self.alert_threshold})")
+            print(f"授权会话白名单: {len(self.authorized_sessions)} 个")
         
         # 获取session数据
         result = self.get_active_sessions()
@@ -258,12 +263,10 @@ class CursorSessionMonitor:
             print(f"  授权会话: {len(authorized)} 个")
             print(f"  未授权会话: {len(unauthorized)} 个")
             
-            # 检查是否需要报警和自动撤销
-            if session_count > self.alert_threshold:
-                alert_message = f"检测到异常! 当前有 {session_count} 个活跃会话，超过阈值 {self.alert_threshold}!"
-                
+            # 严格模式：只要有未授权session就撤销
+            if strict_mode:
                 if unauthorized:
-                    alert_message += f" 发现 {len(unauthorized)} 个未授权会话，正在自动撤销..."
+                    alert_message = f"严格模式: 发现 {len(unauthorized)} 个未授权会话，正在立即撤销..."
                     self.send_alert(alert_message)
                     
                     # 自动撤销未授权session
@@ -289,17 +292,55 @@ class CursorSessionMonitor:
                     
                     # 发送撤销完成通知
                     success_count = sum(1 for r in revoke_results if r['result']['success'])
-                    final_message = f"自动撤销完成! 成功撤销 {success_count}/{len(unauthorized)} 个未授权会话"
+                    final_message = f"严格模式撤销完成! 成功撤销 {success_count}/{len(unauthorized)} 个未授权会话"
                     self.send_alert(final_message)
-                    
                 else:
-                    self.send_alert(alert_message)
-                    self.log_alert(session_count, sessions_info, [])
-                    
+                    print("✅ 严格模式检查通过：所有会话都在白名单中")
+            
+            # 普通模式：考虑阈值
             else:
-                print(f"✅ 会话数量正常 ({session_count} <= {self.alert_threshold})")
-                if unauthorized:
-                    print(f"⚠️  但发现 {len(unauthorized)} 个未授权会话，建议手动检查")
+                # 检查是否需要报警和自动撤销
+                if session_count > self.alert_threshold:
+                    alert_message = f"检测到异常! 当前有 {session_count} 个活跃会话，超过阈值 {self.alert_threshold}!"
+                    
+                    if unauthorized:
+                        alert_message += f" 发现 {len(unauthorized)} 个未授权会话，正在自动撤销..."
+                        self.send_alert(alert_message)
+                        
+                        # 自动撤销未授权session
+                        revoke_results = []
+                        for session in unauthorized:
+                            session_id = session.get('sessionId', '')
+                            session_type = session.get('type', '')
+                            
+                            print(f"\n🔒 正在撤销未授权会话: {session_id[:16]}...")
+                            revoke_result = self.revoke_session(session_id, session_type)
+                            revoke_results.append({
+                                'session': session,
+                                'result': revoke_result
+                            })
+                            
+                            if revoke_result['success']:
+                                print(f"✅ {revoke_result['message']}")
+                            else:
+                                print(f"❌ 撤销失败: {revoke_result['error']}")
+                        
+                        # 记录详细信息到日志文件
+                        self.log_alert(session_count, sessions_info, revoke_results)
+                        
+                        # 发送撤销完成通知
+                        success_count = sum(1 for r in revoke_results if r['result']['success'])
+                        final_message = f"自动撤销完成! 成功撤销 {success_count}/{len(unauthorized)} 个未授权会话"
+                        self.send_alert(final_message)
+                        
+                    else:
+                        self.send_alert(alert_message)
+                        self.log_alert(session_count, sessions_info, [])
+                        
+                else:
+                    print(f"✅ 会话数量正常 ({session_count} <= {self.alert_threshold})")
+                    if unauthorized:
+                        print(f"⚠️  但发现 {len(unauthorized)} 个未授权会话，建议手动检查或使用严格模式")
         else:
             error_message = f"获取会话信息失败: {result['error']}"
             print(f"❌ {error_message}")
@@ -350,16 +391,22 @@ def main():
     主函数
     """
     monitor = CursorSessionMonitor()
+    strict_mode = False
     
-    # 支持命令行参数设置阈值
+    # 解析命令行参数
     if len(sys.argv) > 1:
-        try:
-            monitor.alert_threshold = int(sys.argv[1])
-            print(f"设置报警阈值为: {monitor.alert_threshold}")
-        except ValueError:
-            print("无效的阈值参数，使用默认值: 2")
+        for arg in sys.argv[1:]:
+            if arg.lower() in ['--strict', '-s', 'strict']:
+                strict_mode = True
+                print("🔒 启用严格模式：忽略阈值，清理所有未授权会话")
+            else:
+                try:
+                    monitor.alert_threshold = int(arg)
+                    print(f"设置报警阈值为: {monitor.alert_threshold}")
+                except ValueError:
+                    print(f"忽略无效参数: {arg}")
     
-    monitor.monitor()
+    monitor.monitor(strict_mode)
 
 if __name__ == "__main__":
     main()
