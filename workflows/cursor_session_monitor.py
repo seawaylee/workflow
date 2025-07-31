@@ -20,6 +20,9 @@ class CursorSessionMonitor:
 
         # 用户提供的cookies
         self.cookies = {
+            '_dd_s': 'aid=f9fb177b-0220-4186-bff4-e96ba3370949&rum=2&id=86a96ae6-f3b0-46aa-a297-3a55eebf000e&created=1753855262735&expire=1753856688666',
+            'IndrX2ZuSmZramJSX0NIYUZoRzRzUGZ0cENIVHpHNXk0VE0ya2ZiUkVzQU14X2Fub255bW91c1VzZXJJZCI%3D': 'ImE5MzI4OTdkLWUwYWItNGI3Mi05NGQ5LWVlNDlmYmE5YzFhMSI=',
+            'ph_phc_TXdpocbGVeZVm5VJmAsHTMrCofBQu3e0kN8HGMNGTVW_posthog': '%7B%22distinct_id%22%3A%2201983646-d0f3-73da-814e-9a14414287c1%22%2C%22%24sesid%22%3A%5B1753257281627%2C%2201983646-d0f3-73da-814e-9a126d2e206e%22%2C1753257267443%5D%7D',
             'WorkosCursorSessionToken': 'user_01JXWVM0FER5Z1NJJTY6NGYMRW%3A%3AeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlhXVk0wRkVSNVoxTkpKVFk2TkdZTVJXIiwidGltZSI6IjE3NTMzMjE0NTkiLCJyYW5kb21uZXNzIjoiNTFkNjU0ZmMtMzBlNC00NjA2IiwiZXhwIjoxNzU4NTA1NDU5LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoid2ViIn0.w6yuj6QEZwvn5D1FggCWwlOzyFVWV0A1T0-e3Rjh9Uw'
         }
 
@@ -31,6 +34,7 @@ class CursorSessionMonitor:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Referer': 'https://cursor.com/',
+            'Origin': 'https://cursor.com',
             'Sec-Fetch-Dest': 'empty',
             'Sec-Fetch-Mode': 'cors',
             'Sec-Fetch-Site': 'same-origin',
@@ -42,7 +46,7 @@ class CursorSessionMonitor:
 
         # 授权的session白名单（这些session不会被自动撤销）
         self.authorized_sessions = {
-            'bef44cb7a943c9ebe9c1a770e3607a0755fec16743ebdd4d7846083bb0b80b2e',
+            'fff1feac20fb8ec809d4f55e8ee8109331d40c86528776cc4b883d03805c1063',
             '25555cc17973482b42fa112a896973a3e49dfe3f494fd5a9037e72f105a0b4a9'
         }
 
@@ -114,11 +118,20 @@ class CursorSessionMonitor:
             }
 
             print(f"正在撤销session: {session_id[:16]}... (类型: {session_type})")
+            print(f"撤销请求数据: {json.dumps(payload, ensure_ascii=False)}")
+
+            # 为撤销请求创建专门的headers
+            revoke_headers = self.headers.copy()
+            revoke_headers.update({
+                'Origin': 'https://cursor.com',
+                'Referer': 'https://cursor.com/',
+                'X-Requested-With': 'XMLHttpRequest'
+            })
 
             response = requests.post(
                 self.revoke_url,
                 cookies=self.cookies,
-                headers=self.headers,
+                headers=revoke_headers,
                 json=payload,
                 timeout=30
             )
@@ -130,6 +143,19 @@ class CursorSessionMonitor:
                 return {
                     'success': True,
                     'message': f'成功撤销session: {session_id[:16]}...'
+                }
+            elif response.status_code == 403:
+                # 403错误通常是权限或origin问题
+                error_msg = f'撤销失败 (HTTP 403): 权限不足或请求来源无效'
+                if response.text:
+                    try:
+                        error_data = response.json()
+                        error_msg += f" - {error_data.get('error', response.text)}"
+                    except:
+                        error_msg += f" - {response.text}"
+                return {
+                    'success': False,
+                    'error': error_msg
                 }
             else:
                 return {
