@@ -10,6 +10,8 @@ import requests
 import json
 import os
 import sys
+import gzip
+import brotli
 from datetime import datetime
 
 class CursorSessionMonitor:
@@ -23,7 +25,7 @@ class CursorSessionMonitor:
             '_dd_s': 'aid=f9fb177b-0220-4186-bff4-e96ba3370949&rum=2&id=86a96ae6-f3b0-46aa-a297-3a55eebf000e&created=1753855262735&expire=1753856688666',
             'IndrX2ZuSmZramJSX0NIYUZoRzRzUGZ0cENIVHpHNXk0VE0ya2ZiUkVzQU14X2Fub255bW91c1VzZXJJZCI%3D': 'ImE5MzI4OTdkLWUwYWItNGI3Mi05NGQ5LWVlNDlmYmE5YzFhMSI=',
             'ph_phc_TXdpocbGVeZVm5VJmAsHTMrCofBQu3e0kN8HGMNGTVW_posthog': '%7B%22distinct_id%22%3A%2201983646-d0f3-73da-814e-9a14414287c1%22%2C%22%24sesid%22%3A%5B1753257281627%2C%2201983646-d0f3-73da-814e-9a126d2e206e%22%2C1753257267443%5D%7D',
-            'WorkosCursorSessionToken': 'user_01JXWVM0FER5Z1NJJTY6NGYMRW%3A%3AeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlhXVk0wRkVSNVoxTkpKVFk2TkdZTVJXIiwidGltZSI6IjE3NTMzMjE0NTkiLCJyYW5kb21uZXNzIjoiNTFkNjU0ZmMtMzBlNC00NjA2IiwiZXhwIjoxNzU4NTA1NDU5LCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoid2ViIn0.w6yuj6QEZwvn5D1FggCWwlOzyFVWV0A1T0-e3Rjh9Uw'
+            'WorkosCursorSessionToken': 'user_01JXWVM0FER5Z1NJJTY6NGYMRW%3A%3AeyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdXRoMHx1c2VyXzAxSlhXVk0wRkVSNVoxTkpKVFk2TkdZTVJXIiwidGltZSI6IjE3NTQzNzM5MDIiLCJyYW5kb21uZXNzIjoiYWY2MzIyOTItZTU4Yi00M2EyIiwiZXhwIjoxNzU5NTU3OTAyLCJpc3MiOiJodHRwczovL2F1dGhlbnRpY2F0aW9uLmN1cnNvci5zaCIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhdWQiOiJodHRwczovL2N1cnNvci5jb20iLCJ0eXBlIjoid2ViIn0.GiGtONJiDg2cVEmuWWHPPX-UUsVSSYNnqcfhRnmbf6E'
         }
 
         # 请求头
@@ -46,8 +48,8 @@ class CursorSessionMonitor:
 
         # 授权的session白名单（这些session不会被自动撤销）
         self.authorized_sessions = {
-            'fff1feac20fb8ec809d4f55e8ee8109331d40c86528776cc4b883d03805c1063',
-            '25555cc17973482b42fa112a896973a3e49dfe3f494fd5a9037e72f105a0b4a9'
+            '59210994a60cb9d34fec25e0f790f189cc5a31b066b607d03791f8bf427b9f24',
+            'e6242bdd69d40a6a3b05aba566e9552d716853b1ba87fb592d01e6f8b69869e6'
         }
 
         # session类型映射
@@ -74,13 +76,52 @@ class CursorSessionMonitor:
 
             if response.status_code == 200:
                 try:
-                    data = response.json()
+                    # 检查是否是gzip压缩内容
+                    content_encoding = response.headers.get('content-encoding', '').lower()
+                    response_text = response.text
+                    
+                    # 如果响应看起来是二进制但没有正确解压，尝试手动解压
+                    if not response_text.strip() or (len(response_text) > 0 and ord(response_text[0]) < 32):
+                        print(f"检测到可能的压缩内容 (编码: {content_encoding})，尝试手动解压...")
+                        try:
+                            if content_encoding == 'br':
+                                # Brotli解压
+                                decompressed = brotli.decompress(response.content)
+                                response_text = decompressed.decode('utf-8')
+                                print(f"Brotli解压成功，内容长度: {len(response_text)}")
+                            elif content_encoding == 'gzip':
+                                # gzip解压
+                                decompressed = gzip.decompress(response.content)
+                                response_text = decompressed.decode('utf-8')
+                                print(f"gzip解压成功，内容长度: {len(response_text)}")
+                            else:
+                                # 尝试Brotli（最常见的情况）
+                                try:
+                                    decompressed = brotli.decompress(response.content)
+                                    response_text = decompressed.decode('utf-8')
+                                    print(f"Brotli解压成功（自动检测），内容长度: {len(response_text)}")
+                                except:
+                                    # 如果Brotli失败，尝试gzip
+                                    decompressed = gzip.decompress(response.content)
+                                    response_text = decompressed.decode('utf-8')
+                                    print(f"gzip解压成功（自动检测），内容长度: {len(response_text)}")
+                        except Exception as e:
+                            print(f"解压失败: {e}")
+                            # 如果解压失败，继续使用原始内容
+                            response_text = response.text
+                    
+                    # 尝试解析JSON
+                    data = json.loads(response_text)
                     return {
                         'success': True,
                         'data': data,
                         'session_count': len(data) if isinstance(data, list) else len(data.get('sessions', [])) if isinstance(data, dict) else 0
                     }
                 except json.JSONDecodeError:
+                    print(f"响应内容类型: {response.headers.get('content-type', '未知')}")
+                    print(f"内容编码: {response.headers.get('content-encoding', '无')}")
+                    print(f"响应长度: {len(response.text)}")
+                    print(f"原始响应内容 (前500字符): {response.text[:500]}")
                     return {
                         'success': False,
                         'error': 'JSON解析失败',
